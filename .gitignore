@@ -1,0 +1,29 @@
+# ENV
+.env
+.env.*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+
+
+# Build
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Uploads
+media/
+uploads/
+
+.sqlite3
