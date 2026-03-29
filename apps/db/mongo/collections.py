@@ -1,18 +1,13 @@
 from .db import get_db
 
+db = get_db()
 
+# 🔹 Generic
 def get_collection(name: str):
-    return get_db()[name]
-
+    return db[name]
 
 # 🔹 Specific collections (recommended)
-def users_collection():
-    return get_collection("users")
-
-
-def mentors_collection():
-    return get_collection("mentors")
-
-
-def courses_collection():
-    return get_collection("courses")
+users_collection = db["users"]
+mentors_collection = db["mentors"]
+courses_collection = db["courses"]
+internships_collection = db["internships"]

@@ -10,3 +10,4 @@ def get_db():
 
     client = get_client()
     return client[db_name]
+

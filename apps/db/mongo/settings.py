@@ -13,3 +13,5 @@ print("📂 Exists?", os.path.exists(env_path))
 load_dotenv(env_path)
 
 print("✅ MONGO_URI:", os.getenv("MONGO_URI"))
+
+
