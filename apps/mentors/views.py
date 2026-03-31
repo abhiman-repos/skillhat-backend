@@ -2,8 +2,9 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 import json
 import cloudinary.uploader
-from bson import ObjectId
+
 from apps.db.mongo.collections import mentors_collection
+from bson.objectid import ObjectId
 
 
 # ✅ CREATE MENTOR (FORM-DATA)
@@ -101,16 +102,38 @@ def get_mentor(request, id):
 def update_mentor(request, id):
     if request.method == "PUT":
         try:
-            data = json.loads(request.body)
+            if not ObjectId.is_valid(id):
+                return JsonResponse({"error": "Invalid ID"}, status=400)
 
-            mentors_collection.update_one(
+            # ✅ Get data from FormData
+            data = request.POST.dict()
+
+            # Convert numbers properly
+            if "rating" in data:
+                data["rating"] = float(data["rating"])
+            if "totalStudents" in data:
+                data["totalStudents"] = int(data["totalStudents"])
+
+            # ❌ prevent _id update
+            data.pop("_id", None)
+
+            # 📸 Handle image
+            if request.FILES.get("image"):
+                image = request.FILES["image"]
+                data["image"] = image.name  # or save path if needed
+
+            result = mentors_collection.update_one(
                 {"_id": ObjectId(id)},
                 {"$set": data}
             )
 
-            return JsonResponse({"message": "Mentor updated"})
+            if result.matched_count == 0:
+                return JsonResponse({"error": "Mentor not found"}, status=404)
+
+            return JsonResponse({"message": "Mentor updated successfully"})
 
         except Exception as e:
+            print("ERROR:", str(e))
             return JsonResponse({"error": str(e)}, status=500)
 
 
