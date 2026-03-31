@@ -2,7 +2,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 import json
 import cloudinary.uploader
-from apps.db.mongo.collections import internships_collection
+from apps.db.mongo.collections import internships_collection , mentors_collection
+
 from bson import ObjectId
 
 
@@ -37,6 +38,23 @@ def create_internship(request):
 
             data = json.loads(body)
 
+            # ✅ mentor names from frontend
+            mentor_names = data.get("mentorNames", [])
+
+            mentors = []
+
+            if mentor_names:
+                mentors_cursor = mentors_collection.find({
+                    "name": {"$in": mentor_names}
+                })
+
+                for mentor in mentors_cursor:
+                    mentors.append({
+                        "name": mentor.get("name"),
+                        "expertise": mentor.get("expertise"),
+                    })
+            
+
             internship_data = {
                 "title": data.get("title"),
                 "company": data.get("company"),
@@ -48,9 +66,14 @@ def create_internship(request):
                 "status": data.get("status", "Active"),
                 "imageUrl": data.get("imageUrl"),
                 "public_id": data.get("public_id"),
+
+                # 🔥 store mentors by name
+                "mentors": mentors,
+                "youtube": data.get("youtube")
             }
 
-            print("Saving:", internship_data)
+            print("Mentor Names from frontend:", mentor_names)
+            print("Mentors saved:", mentors)
 
             result = internships_collection.insert_one(internship_data)
 
@@ -60,7 +83,7 @@ def create_internship(request):
             })
 
         except Exception as e:
-            print("ERROR:", str(e))  # 👈 VERY IMPORTANT
+            print("ERROR:", str(e))
             return JsonResponse({"error": str(e)}, status=500)
 
 
@@ -101,6 +124,25 @@ def update_internship(request, id):
         try:
             data = json.loads(request.body)
 
+            mentor_names = data.get("mentorNames", [])
+
+            mentors = []
+
+            if mentor_names:
+                mentors_cursor = mentors_collection.find({
+                    "name": {"$in": mentor_names}
+                })
+
+                for mentor in mentors_cursor:
+                    mentors.append({
+                        "name": mentor.get("name"),
+                        "expertise": mentor.get("expertise"),
+                    })
+
+            # ✅ replace mentorNames with mentors
+            data["mentors"] = mentors
+            data.pop("mentorNames", None)
+
             internships_collection.update_one(
                 {"_id": ObjectId(id)},
                 {"$set": data}
@@ -109,6 +151,7 @@ def update_internship(request, id):
             return JsonResponse({"message": "Internship updated successfully"})
 
         except Exception as e:
+            print("UPDATE ERROR:", str(e))
             return JsonResponse({"error": str(e)}, status=500)
 
 
@@ -147,4 +190,5 @@ def internship(request, id):
 
         except Exception as e:
             print("GET INTERNSHIP ERROR:", str(e))
+
             return JsonResponse({"error": str(e)}, status=500)

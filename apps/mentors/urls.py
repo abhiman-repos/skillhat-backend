@@ -5,6 +5,7 @@ from .views import (
     get_mentor,
     update_mentor,
     delete_mentor,
+    search_mentors,
 )
 
 urlpatterns = [
@@ -13,4 +14,5 @@ urlpatterns = [
     path("get_mentor/<str:id>/", get_mentor),
     path("update_mentor/<str:id>/", update_mentor),
     path("delete_mentor/<str:id>/", delete_mentor),
+    path("search-mentors/", search_mentors)
 ]

@@ -84,18 +84,41 @@ def list_mentors(request):
 def get_mentor(request, id):
     if request.method == "GET":
         try:
+            # ✅ Validate ID
+            if not ObjectId.is_valid(id):
+                return JsonResponse({"error": "Invalid ID"}, status=400)
+
             mentor = mentors_collection.find_one({"_id": ObjectId(id)})
 
             if not mentor:
-                return JsonResponse({"error": "Not found"}, status=404)
+                return JsonResponse({"error": "Mentor not found"}, status=404)
 
+            # ✅ Convert ObjectId
             mentor["_id"] = str(mentor["_id"])
 
             return JsonResponse(mentor)
 
         except Exception as e:
+            print("ERROR:", str(e))
             return JsonResponse({"error": str(e)}, status=500)
 
+
+def get_all_mentors(request):
+    if request.method == "GET":
+        try:
+            mentors = list(mentors_collection.find({}, {
+                "name": 1,
+                "expertise": 1,
+                "image": 1
+            }))
+
+            for m in mentors:
+                m["_id"] = str(m["_id"])
+
+            return JsonResponse(mentors, safe=False)
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
 
 # ✅ UPDATE MENTOR
 @csrf_exempt
@@ -154,6 +177,28 @@ def delete_mentor(request, id):
             mentors_collection.delete_one({"_id": ObjectId(id)})
 
             return JsonResponse({"message": "Mentor deleted"})
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+        
+
+def search_mentors(request):
+    if request.method == "GET":
+        try:
+            query = request.GET.get("q", "")
+
+            mentors = list(mentors_collection.find({
+                "name": {"$regex": query, "$options": "i"}
+            }, {
+                "name": 1,
+                "expertise": 1,
+                "image": 1
+            }).limit(10))  # 🔥 limit for performance
+
+            for m in mentors:
+                m["_id"] = str(m["_id"])
+
+            return JsonResponse(mentors, safe=False)
 
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
