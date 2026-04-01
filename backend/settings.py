@@ -28,6 +28,10 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 JWT_SECRET = os.getenv("JWT_SECRET")
 
 print("🔑 RESEND_API_KEY loaded")
+if RESEND_API_KEY:
+    print("🔑 Key starts with:", RESEND_API_KEY[:15] + "...")
+else:
+    print("❌ RESEND_API_KEY is still empty!")
 
 
 

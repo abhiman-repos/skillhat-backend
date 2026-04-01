@@ -9,14 +9,15 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 import jwt
 from bson.objectid import ObjectId
-from apps.db.mongo.collections import otp_collection, admin_access_collection
+from apps.db.mongo.collections import admin_access_collection
 
 load_dotenv()
 SECRET = os.getenv("JWT_SECRET")
-RESENT_API_KEY= os.getenv("RESENT_API_KEY")
-print("this is resent",RESENT_API_KEY)
+RESENT_API_KEY = os.getenv("RESENT_API_KEY")
+print("this is resent", RESENT_API_KEY)
 
 logger = logging.getLogger(__name__)
+
 # ====================== ADMIN MANAGEMENT ======================
 
 @csrf_exempt
@@ -56,7 +57,9 @@ def add_admin(request):
             "email": email.lower().strip(),
             "expires_at": expires_at,           # Stored as UTC datetime
             "created_at": datetime.datetime.now(datetime.timezone.utc),
-            "last_login": None
+            "last_login": None,
+            "otp": None,                        # OTP field
+            "otp_created_at": None              # OTP creation timestamp
         })
 
         return JsonResponse({"message": "Admin added successfully"}, status=201)
@@ -68,7 +71,14 @@ def add_admin(request):
 @require_http_methods(["GET"])
 def list_admins(request):
     try:
-        admins = list(admin_access_collection.find({}, {"last_login": 1, "email": 1, "expires_at": 1, "created_at": 1}))
+        admins = list(admin_access_collection.find({}, {
+            "last_login": 1, 
+            "email": 1, 
+            "expires_at": 1, 
+            "created_at": 1,
+            "otp": 1,
+            "otp_created_at": 1
+        }))
 
         for admin in admins:
             admin["_id"] = str(admin["_id"])
@@ -79,6 +89,11 @@ def list_admins(request):
                 admin["created_at"] = admin["created_at"].isoformat()
             if "last_login" in admin and isinstance(admin["last_login"], datetime.datetime):
                 admin["last_login"] = admin["last_login"].isoformat()
+            if "otp_created_at" in admin and isinstance(admin["otp_created_at"], datetime.datetime):
+                admin["otp_created_at"] = admin["otp_created_at"].isoformat()
+            # Remove OTP value from response for security
+            if "otp" in admin:
+                del admin["otp"]
 
         return JsonResponse(admins, safe=False)
 
@@ -122,25 +137,33 @@ def send_otp(request):
 
         email = email.lower().strip()
 
-        record = admin_access_collection.find_one({"email": email})
-        if not record:
+        # Find admin record
+        admin_record = admin_access_collection.find_one({"email": email})
+        if not admin_record:
             return JsonResponse({"error": "Access denied: Not an authorized admin"}, status=403)
 
-        # Safe expiry check...
+        # Check if admin access has expired
         now_utc = datetime.datetime.now(datetime.timezone.utc)
-        expires_at = record.get("expires_at")
+        expires_at = admin_record.get("expires_at")
+        
         if isinstance(expires_at, datetime.datetime) and expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=datetime.timezone.utc)
 
         if now_utc > expires_at:
             return JsonResponse({"error": "Admin access has expired"}, status=403)
 
+        # Generate OTP
         otp = str(random.randint(100000, 999999))
-
-        otp_collection.update_one(
+        
+        # Store OTP and its creation time in the admin document
+        admin_access_collection.update_one(
             {"email": email},
-            {"$set": {"otp": otp, "created_at": now_utc}},
-            upsert=True
+            {
+                "$set": {
+                    "otp": otp,
+                    "otp_created_at": now_utc
+                }
+            }
         )
 
         # Send via Resend
@@ -149,7 +172,7 @@ def send_otp(request):
 
         return JsonResponse({"message": "OTP sent successfully to your email"})
 
-    except ValueError as ve:   # Catches missing API key
+    except ValueError as ve:
         logger.error(str(ve))
         return JsonResponse({"error": "Email service configuration error"}, status=500)
     except Exception as e:
@@ -171,32 +194,45 @@ def verify_otp(request):
         email = email.lower().strip()
         otp = str(otp).strip()
 
-        record = otp_collection.find_one({"email": email})
+        # Find admin record with OTP
+        admin_record = admin_access_collection.find_one({"email": email})
 
-        if not record:
+        if not admin_record:
+            return JsonResponse({"error": "Admin not found"}, status=404)
+
+        # Check if OTP exists
+        stored_otp = admin_record.get("otp")
+        otp_created_at = admin_record.get("otp_created_at")
+
+        if not stored_otp or not otp_created_at:
             return JsonResponse({"error": "No OTP request found"}, status=404)
 
-        # ====================== FIXED: Safe datetime comparison ======================
+        # Safe datetime comparison
         now_utc = datetime.datetime.now(datetime.timezone.utc)
-        created_at = record.get("created_at")
-
-        if not isinstance(created_at, datetime.datetime):
-            return JsonResponse({"error": "Invalid OTP record"}, status=500)
-
-        # Make created_at timezone-aware if it's naive (common with PyMongo)
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=datetime.timezone.utc)
+        
+        # Make otp_created_at timezone-aware if it's naive
+        if otp_created_at.tzinfo is None:
+            otp_created_at = otp_created_at.replace(tzinfo=datetime.timezone.utc)
 
         # Check if OTP is older than 5 minutes
-        if (now_utc - created_at).total_seconds() > 300:
-            otp_collection.delete_one({"email": email})
+        if (now_utc - otp_created_at).total_seconds() > 300:
+            # Clear expired OTP
+            admin_access_collection.update_one(
+                {"email": email},
+                {
+                    "$set": {
+                        "otp": None,
+                        "otp_created_at": None
+                    }
+                }
+            )
             return JsonResponse({"error": "OTP has expired"}, status=400)
 
         # Check OTP value
-        if record.get("otp") != otp:
+        if stored_otp != otp:
             return JsonResponse({"error": "Invalid OTP"}, status=400)
 
-        # ====================== JWT Token Generation ======================
+        # JWT Token Generation
         token = jwt.encode(
             {
                 "email": email,
@@ -206,14 +242,17 @@ def verify_otp(request):
             algorithm="HS256"
         )
 
-        # Update last_login with consistent UTC aware datetime
+        # Update last_login and clear OTP
         admin_access_collection.update_one(
             {"email": email},
-            {"$set": {"last_login": now_utc}}
+            {
+                "$set": {
+                    "last_login": now_utc,
+                    "otp": None,           # Clear OTP after successful verification
+                    "otp_created_at": None
+                }
+            }
         )
-
-        # Clean up used OTP
-        otp_collection.delete_one({"email": email})
 
         return JsonResponse({
             "message": "Login successful",
@@ -224,5 +263,5 @@ def verify_otp(request):
         print(f"JWT Error: {jwt_err}")
         return JsonResponse({"error": "Token generation failed"}, status=500)
     except Exception as e:
-        print(f"Verify OTP Error: {str(e)}")  # Better logging
+        print(f"Verify OTP Error: {str(e)}")
         return JsonResponse({"error": "Internal server error"}, status=500)
