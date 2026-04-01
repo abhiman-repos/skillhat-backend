@@ -17,8 +17,6 @@ def create_mentor(request):
             expertise = request.POST.get("expertise")
             bio = request.POST.get("bio")
             experience = request.POST.get("experience")
-            rating = request.POST.get("rating")
-            total_students = request.POST.get("totalStudents")
             status = request.POST.get("status", "Active")
 
             # 🔒 Validation
@@ -45,8 +43,6 @@ def create_mentor(request):
                 "expertise": expertise,
                 "bio": bio,
                 "experience": experience,
-                "rating": int(rating) if rating else 0,
-                "totalStudents": int(total_students) if total_students else 0,
                 "status": status,
                 "imageUrl": image_url,
                 "public_id": public_id,
@@ -128,35 +124,47 @@ def update_mentor(request, id):
             if not ObjectId.is_valid(id):
                 return JsonResponse({"error": "Invalid ID"}, status=400)
 
-            # ✅ Get data from FormData
-            data = request.POST.dict()
-
-            # Convert numbers properly
-            if "rating" in data:
-                data["rating"] = float(data["rating"])
-            if "totalStudents" in data:
-                data["totalStudents"] = int(data["totalStudents"])
+            # ✅ Parse JSON body
+            body = json.loads(request.body)
 
             # ❌ prevent _id update
-            data.pop("_id", None)
+            body.pop("_id", None)
 
-            # 📸 Handle image
-            if request.FILES.get("image"):
-                image = request.FILES["image"]
-                data["image"] = image.name  # or save path if needed
+            # ✅ Handle image (base64 or URL expected)
+            image_url = body.get("imageUrl")
+            public_id = body.get("public_id")
+
+            # OPTIONAL: If sending base64 image
+            if body.get("image"):
+                upload_result = cloudinary.uploader.upload(body["image"])
+                image_url = upload_result["secure_url"]
+                public_id = upload_result["public_id"]
+
+                body["imageUrl"] = image_url
+                body["public_id"] = public_id
+
+            # ✅ Convert numbers if needed
+            if "experience" in body:
+                try:
+                    body["experience"] = int(body["experience"])
+                except:
+                    pass
 
             result = mentors_collection.update_one(
                 {"_id": ObjectId(id)},
-                {"$set": data}
+                {"$set": body}
             )
 
             if result.matched_count == 0:
                 return JsonResponse({"error": "Mentor not found"}, status=404)
 
-            return JsonResponse({"message": "Mentor updated successfully"})
+            return JsonResponse({
+                "message": "Mentor updated successfully",
+                "imageUrl": image_url
+            })
 
         except Exception as e:
-            print("ERROR:", str(e))
+            print("UPDATE ERROR:", str(e))
             return JsonResponse({"error": str(e)}, status=500)
 
 
@@ -192,7 +200,6 @@ def search_mentors(request):
             }, {
                 "name": 1,
                 "expertise": 1,
-                "image": 1
             }).limit(10))  # 🔥 limit for performance
 
             for m in mentors:
