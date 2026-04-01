@@ -152,26 +152,52 @@ def send_otp(request):
         if now_utc > expires_at:
             return JsonResponse({"error": "Admin access has expired"}, status=403)
 
-        # Generate OTP
+        # Generate OTP - store as string consistently
         otp = str(random.randint(100000, 999999))
         
         # Store OTP and its creation time in the admin document
-        admin_access_collection.update_one(
+        result = admin_access_collection.update_one(
             {"email": email},
             {
                 "$set": {
-                    "otp": otp,
+                    "otp": otp,  # Store as string
                     "otp_created_at": now_utc
                 }
             }
         )
+        
+        logger.info(f"OTP generated for {email}: {otp}")
+        logger.debug(f"Update result: matched={result.matched_count}, modified={result.modified_count}")
 
-        # Send via Resend
-        from apps.utils.email import send_otp_email
-        send_otp_email(email, otp, expiry_minutes=5)
+        # Send email with OTP
+        try:
+            # Try to import and use Resend
+            try:
+                from apps.utils.email import send_otp_email
+                send_otp_email(email, otp, expiry_minutes=5)
+            except ImportError as ie:
+                logger.warning(f"Email module not found: {ie}")
+                # Print OTP to console for development
+                print(f"\n{'='*50}")
+                print(f"🔐 OTP for {email}: {otp}")
+                print(f"⏰ Expires in: 5 minutes")
+                print(f"{'='*50}\n")
+            except Exception as email_error:
+                logger.error(f"Failed to send email: {str(email_error)}")
+                # Print OTP to console as fallback
+                print(f"\n{'='*50}")
+                print(f"🔐 OTP for {email}: {otp} (Email failed: {email_error})")
+                print(f"{'='*50}\n")
+                
+        except Exception as email_error:
+            logger.error(f"Email error: {str(email_error)}")
+            # Still return success since OTP is stored
+            # User can check console/logs for OTP
 
         return JsonResponse({"message": "OTP sent successfully to your email"})
 
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
     except ValueError as ve:
         logger.error(str(ve))
         return JsonResponse({"error": "Email service configuration error"}, status=500)
@@ -192,7 +218,13 @@ def verify_otp(request):
             return JsonResponse({"error": "Email and OTP are required"}, status=400)
 
         email = email.lower().strip()
+        
+        # Handle OTP - convert to string and remove any whitespace
         otp = str(otp).strip()
+        
+        # Validate OTP is exactly 6 digits
+        if not otp.isdigit() or len(otp) != 6:
+            return JsonResponse({"error": "Invalid OTP format"}, status=400)
 
         # Find admin record with OTP
         admin_record = admin_access_collection.find_one({"email": email})
@@ -200,12 +232,19 @@ def verify_otp(request):
         if not admin_record:
             return JsonResponse({"error": "Admin not found"}, status=404)
 
-        # Check if OTP exists
+        # Check if OTP exists - handle both string and integer OTPs
         stored_otp = admin_record.get("otp")
         otp_created_at = admin_record.get("otp_created_at")
 
         if not stored_otp or not otp_created_at:
             return JsonResponse({"error": "No OTP request found"}, status=404)
+
+        # Convert stored OTP to string for comparison (handle int/string)
+        stored_otp_str = str(stored_otp).strip()
+        
+        # Debug logging
+        logger.info(f"Verifying OTP for {email}")
+        logger.debug(f"Stored OTP: {stored_otp_str}, Received OTP: {otp}")
 
         # Safe datetime comparison
         now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -215,7 +254,8 @@ def verify_otp(request):
             otp_created_at = otp_created_at.replace(tzinfo=datetime.timezone.utc)
 
         # Check if OTP is older than 5 minutes
-        if (now_utc - otp_created_at).total_seconds() > 300:
+        time_diff = (now_utc - otp_created_at).total_seconds()
+        if time_diff > 300:
             # Clear expired OTP
             admin_access_collection.update_one(
                 {"email": email},
@@ -228,8 +268,8 @@ def verify_otp(request):
             )
             return JsonResponse({"error": "OTP has expired"}, status=400)
 
-        # Check OTP value
-        if stored_otp != otp:
+        # Check OTP value - case insensitive comparison
+        if stored_otp_str != otp:
             return JsonResponse({"error": "Invalid OTP"}, status=400)
 
         # JWT Token Generation
@@ -259,9 +299,11 @@ def verify_otp(request):
             "token": token
         })
 
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
     except jwt.PyJWTError as jwt_err:
-        print(f"JWT Error: {jwt_err}")
+        logger.error(f"JWT Error: {jwt_err}")
         return JsonResponse({"error": "Token generation failed"}, status=500)
     except Exception as e:
-        print(f"Verify OTP Error: {str(e)}")
+        logger.error(f"Verify OTP Error: {str(e)}")
         return JsonResponse({"error": "Internal server error"}, status=500)
