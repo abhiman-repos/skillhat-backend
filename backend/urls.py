@@ -25,3 +25,4 @@ urlpatterns = [
     path('upload/', include('apps.internship.urls')),
     path("auth/", include("apps.admin.urls"))
 ]
+
