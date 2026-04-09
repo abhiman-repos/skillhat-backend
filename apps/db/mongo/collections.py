@@ -8,8 +8,9 @@ def get_collection(name: str):
 
 # 🔹 Specific collections (recommended)
 users_collection = db["users"]
+address_collection = db["user_data"]
 mentors_collection = db["mentors"]
-courses_collection = db["courses"]
 internships_collection = db["internships"]
+enrollments_collection = db["enrollments"]
 otp_collection = db["otp"]
 admin_access_collection= db["admin_auth"]

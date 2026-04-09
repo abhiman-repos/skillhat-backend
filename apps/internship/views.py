@@ -1,10 +1,12 @@
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 import json
+from datetime import datetime
 import cloudinary.uploader
-from apps.db.mongo.collections import internships_collection, mentors_collection
+from apps.db.mongo.collections import internships_collection, mentors_collection, enrollments_collection, users_collection
 from bson import ObjectId
 from bson.errors import InvalidId
+from apps.users.views import decode_token
 
 
 # ---------------------------
@@ -275,3 +277,77 @@ def internship(request, id):
             print("GET INTERNSHIP ERROR:", str(e))
 
             return JsonResponse({"error": str(e)}, status=500)
+
+@csrf_exempt
+def enroll_internship(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = decode_token(request)
+    if error:
+        return error
+
+    data = parse_json(request)
+    internship_id = data.get("internship_id")
+
+    if not internship_id:
+        return JsonResponse({"error": "internship_id required"}, status=400)
+
+    try:
+        # 🔥 Prevent duplicate enrollment
+        existing = enrollments_collection.find_one({
+            "user_id": user["_id"],
+            "internship_id": ObjectId(internship_id)
+        })
+
+        if existing:
+            return JsonResponse({"message": "Already enrolled"})
+
+        # 🔥 Insert enrollment
+        enrollments_collection.insert_one({
+            "user_id": user["_id"],
+            "internship_id": ObjectId(internship_id),
+            "created_at": datetime.utcnow()
+        })
+
+        return JsonResponse({"message": "Enrolled successfully"})
+
+    except Exception as e:
+        print("ENROLL ERROR:", str(e))
+        return JsonResponse({"error": "Enrollment failed"}, status=500)
+    
+@csrf_exempt
+def all_enrollments(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    try:
+        enrollments = list(enrollments_collection.find())
+
+        result = []
+
+        for e in enrollments:
+            user = users_collection.find_one({"_id": e["user_id"]})
+            internship = internships_collection.find_one({"_id": e["internship_id"]})
+
+            result.append({
+                "user": {
+                    "id": str(user["_id"]),
+                    "name": user.get("full_name"),
+                    "email": user.get("email"),
+                } if user else None,
+
+                "internship": {
+                    "id": str(internship["_id"]),
+                    "title": internship.get("title"),
+                    "company": internship.get("company"),
+                } if internship else None,
+
+                "created_at": e.get("created_at")
+            })
+
+        return JsonResponse({"enrollments": result})
+
+    except Exception as e:
+        print("ADMIN ERROR:", str(e))
+        return JsonResponse({"error": "Failed"}, status=500)

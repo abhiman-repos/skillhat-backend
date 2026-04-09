@@ -6,7 +6,9 @@ from .views import (
     delete_internship,
     update_internship,
     get_internship,
-    internship
+    internship,
+    enroll_internship,
+    all_enrollments
     
 )
 
@@ -18,5 +20,8 @@ urlpatterns = [
     path('update_internship/<str:id>/', update_internship),
     path('edit/<str:id>/', get_internship),
     path('internship/<str:id>/', internship),
+    path("enroll/", enroll_internship),
+
+    path("admin/enrollments/", all_enrollments)
     
 ]
