@@ -3,7 +3,7 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 from datetime import datetime
 import cloudinary.uploader
-from apps.db.mongo.collections import internships_collection, mentors_collection, enrollments_collection, users_collection
+from apps.db.mongo.collections import internships_collection, mentors_collection, enrollments_collection, users_collection, admin_access_collection
 from bson import ObjectId
 from bson.errors import InvalidId
 from apps.users.views import decode_token
@@ -331,6 +331,7 @@ def all_enrollments(request):
             internship = internships_collection.find_one({"_id": e["internship_id"]})
 
             result.append({
+                "_id": str(e["_id"]),
                 "user": {
                     "id": str(user["_id"]),
                     "name": user.get("full_name"),
@@ -343,7 +344,8 @@ def all_enrollments(request):
                     "company": internship.get("company"),
                 } if internship else None,
 
-                "created_at": e.get("created_at")
+                "created_at": e.get("created_at"),
+                "certificate_issued": e.get("certificate_issued", False),
             })
 
         return JsonResponse({"enrollments": result})
@@ -351,3 +353,75 @@ def all_enrollments(request):
     except Exception as e:
         print("ADMIN ERROR:", str(e))
         return JsonResponse({"error": "Failed"}, status=500)
+    
+
+@csrf_exempt
+def remove_enrollment(request, enrollment_id):
+    if request.method != "DELETE":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = decode_token(request)
+    if error:
+        return error
+
+    # 🔐 ADMIN CHECK (CORRECT WAY)
+    admin = admin_access_collection.find_one({
+        "email": user.get("email", "").lower().strip()
+    })
+
+    if not admin:
+        return JsonResponse({"error": "Unauthorized (Admin only)"}, status=403)
+
+    try:
+        result = enrollments_collection.delete_one({
+            "_id": ObjectId(enrollment_id)
+        })
+
+        if result.deleted_count == 0:
+            return JsonResponse({"error": "Enrollment not found"}, status=404)
+
+        return JsonResponse({"message": "Enrollment removed successfully"})
+
+    except Exception as e:
+        print("REMOVE ERROR:", str(e))
+        return JsonResponse({"error": "Failed to remove enrollment"}, status=500)
+    
+@csrf_exempt
+def send_certificate(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = decode_token(request)
+    if error:
+        return error
+
+    # 🔐 admin check (email based)
+    admin = admin_access_collection.find_one({
+        "email": user.get("email", "").lower().strip()
+    })
+
+    if not admin:
+        return JsonResponse({"error": "Unauthorized"}, status=403)
+
+    data = json.loads(request.body)
+    user_id = data.get("user_id")
+    internship_id = data.get("internship_id")
+
+    try:
+        enrollments_collection.update_one(
+            {
+                "user_id": ObjectId(user_id),
+                "internship_id": ObjectId(internship_id)
+            },
+            {
+                "$set": {
+                    "certificate_issued": True,
+                    "issued_at": datetime.utcnow()
+                }
+            }
+        )
+
+        return JsonResponse({"message": "Certificate issued"})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)

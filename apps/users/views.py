@@ -365,3 +365,29 @@ def my_enrollments(request):
 
     return JsonResponse({"enrollments": result})
     
+def my_certificates(request):
+    user, error = decode_token(request)
+    if error:
+        return error
+
+    enrollments = list(enrollments_collection.find({
+        "user_id": user["_id"],
+        "certificate_issued": True
+    }))
+
+    result = []
+
+    for e in enrollments:
+        internship = internships_collection.find_one({
+            "_id": e["internship_id"]
+        })
+
+        result.append({
+            "id": str(e["_id"]),
+            "title": internship.get("title"),
+            "course": internship.get("title"),
+            "issuedDate": e.get("issued_at"),
+            "certificateId": f"CERT-{str(e['_id'])[:6]}"
+        })
+
+    return JsonResponse({"certificates": result})

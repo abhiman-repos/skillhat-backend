@@ -21,6 +21,8 @@ urlpatterns = [
     path("address/delete/<str:address_id>/", views.delete_address, name="delete_address"),
 
     path("my-enrollments/", views.my_enrollments),
+    path("my-certificates/", views.my_certificates),
+
 
     # ================= PASSWORD ================= #
    # path("forgot-password/", views.forgot_password, name="forgot_password"),
