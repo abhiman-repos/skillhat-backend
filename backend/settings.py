@@ -25,7 +25,8 @@ load_dotenv(env_path)
 
 # Load keys correctly
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-JWT_SECRET = os.getenv("JWT_SECRET")
+SECRET_KEY  = os.getenv("JWT_SECRET")
+print(SECRET_KEY)
 
 print("🔑 RESEND_API_KEY loaded")
 if RESEND_API_KEY:

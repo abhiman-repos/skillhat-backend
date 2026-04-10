@@ -8,7 +8,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 
-from apps.db.mongo.collections import users_collection, address_collection, enrollments_collection, internships_collection
+from apps.db.mongo.collections import users_collection, address_collection,admin_access_collection, enrollments_collection, internships_collection
 from apps.utils.logger import log_error, log_info
 
 
@@ -17,32 +17,69 @@ from apps.utils.logger import log_error, log_info
 def decode_token(request):
     auth_header = request.headers.get("Authorization")
 
+    # 🔒 Validate header
     if not auth_header or not auth_header.startswith("Bearer "):
         return None, JsonResponse({"error": "Unauthorized"}, status=401)
 
     try:
-        token = auth_header.split(" ")[1]
+        token = auth_header.split(" ")[1].strip()
 
-        # ❗ Fix: check empty token
+        # 🔥 Prevent invalid tokens from frontend
         if not token or token in ["undefined", "null"]:
             return None, JsonResponse({"error": "Invalid token"}, status=401)
 
-        decoded = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        # 🔐 Decode JWT
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=["HS256"]
+        )
 
-        user_id = decoded.get("user_id")
+        user = None
 
-        user = users_collection.find_one({"_id": ObjectId(user_id)})
+        # =========================
+        # 👤 USER TOKEN (user_id)
+        # =========================
+        if "user_id" in payload:
+            user_id = payload.get("user_id")
 
-        if not user:
-            return None, JsonResponse({"error": "User not found"}, status=404)
+            if not ObjectId.is_valid(user_id):
+                return None, JsonResponse({"error": "Invalid user_id"}, status=400)
 
-        return user, None
+            user = users_collection.find_one({
+                "_id": ObjectId(user_id)
+            })
 
-    except jwt.DecodeError:
-        return None, JsonResponse({"error": "Invalid token format"}, status=401)
+            if user:
+                user["role"] = "user"   # 🔥 attach role
+                return user, None
+
+        # =========================
+        # 🛡️ ADMIN TOKEN (email)
+        # =========================
+        if "email" in payload:
+            email = payload.get("email", "").lower().strip()
+
+            admin = admin_access_collection.find_one({
+                "email": email
+            })
+
+            if admin:
+                admin["role"] = "admin"   # 🔥 attach role
+                return admin, None
+
+        # ❌ No valid user/admin found
+        return None, JsonResponse({"error": "User not found"}, status=404)
+
+    # =========================
+    # ❌ ERROR HANDLING
+    # =========================
 
     except jwt.ExpiredSignatureError:
         return None, JsonResponse({"error": "Token expired"}, status=401)
+
+    except jwt.DecodeError:
+        return None, JsonResponse({"error": "Invalid token format"}, status=401)
 
     except Exception as e:
         log_error(f"JWT ERROR: {str(e)}")

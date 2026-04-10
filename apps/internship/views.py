@@ -7,6 +7,48 @@ from apps.db.mongo.collections import internships_collection, mentors_collection
 from bson import ObjectId
 from bson.errors import InvalidId
 from apps.users.views import decode_token
+import jwt 
+from django.conf import settings
+
+
+
+def decode_admin_token(request):
+    auth_header = request.headers.get("Authorization")
+
+    if not auth_header or not auth_header.startswith("Bearer"):
+        return None, JsonResponse({"error": "Unauthorized"}, status=401)
+
+    try:
+        token = auth_header.split(" ")[1].strip()
+
+        if not token or token in ["undefined", "null"]:
+            return None, JsonResponse({"error": "Invalid token"}, status=401)
+
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        print("this is the value of secret key",settings.SECRET_KEY)
+
+        email = payload.get("email")
+        if not email:
+            return None, JsonResponse({"error": "Invalid admin token"}, status=401)
+
+        admin = admin_access_collection.find_one({
+            "email": email.lower().strip()
+        })
+
+        if not admin:
+            return None, JsonResponse({"error": "Admin not found"}, status=403)
+
+        return admin, None
+
+    except jwt.ExpiredSignatureError:
+        return None, JsonResponse({"error": "Token expired"}, status=401)
+
+    except jwt.DecodeError:
+        return None, JsonResponse({"error": "Invalid token format"}, status=401)
+
+    except Exception as e:
+        print("ADMIN AUTH ERROR:", str(e))
+        return None, JsonResponse({"error": "Unauthorized"}, status=401)
 
 
 # ---------------------------
@@ -360,19 +402,14 @@ def remove_enrollment(request, enrollment_id):
     if request.method != "DELETE":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    user, error = decode_token(request)
+    admin, error = decode_admin_token(request)
     if error:
         return error
 
-    # 🔐 ADMIN CHECK (CORRECT WAY)
-    admin = admin_access_collection.find_one({
-        "email": user.get("email", "").lower().strip()
-    })
-
-    if not admin:
-        return JsonResponse({"error": "Unauthorized (Admin only)"}, status=403)
-
     try:
+        if not ObjectId.is_valid(enrollment_id):
+            return JsonResponse({"error": "Invalid ID"}, status=400)
+
         result = enrollments_collection.delete_one({
             "_id": ObjectId(enrollment_id)
         })
@@ -391,24 +428,20 @@ def send_certificate(request):
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    user, error = decode_token(request)
+    admin, error = decode_admin_token(request)
     if error:
         return error
 
-    # 🔐 admin check (email based)
-    admin = admin_access_collection.find_one({
-        "email": user.get("email", "").lower().strip()
-    })
-
-    if not admin:
-        return JsonResponse({"error": "Unauthorized"}, status=403)
-
-    data = json.loads(request.body)
-    user_id = data.get("user_id")
-    internship_id = data.get("internship_id")
-
     try:
-        enrollments_collection.update_one(
+        data = json.loads(request.body)
+
+        user_id = data.get("user_id")
+        internship_id = data.get("internship_id")
+
+        if not ObjectId.is_valid(user_id) or not ObjectId.is_valid(internship_id):
+            return JsonResponse({"error": "Invalid IDs"}, status=400)
+
+        result = enrollments_collection.update_one(
             {
                 "user_id": ObjectId(user_id),
                 "internship_id": ObjectId(internship_id)
@@ -421,7 +454,11 @@ def send_certificate(request):
             }
         )
 
+        if result.matched_count == 0:
+            return JsonResponse({"error": "Enrollment not found"}, status=404)
+
         return JsonResponse({"message": "Certificate issued"})
 
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+        print("CERT ERROR:", str(e))
+        return JsonResponse({"error": "Failed"}, status=500)

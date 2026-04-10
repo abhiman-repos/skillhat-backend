@@ -10,9 +10,9 @@ from django.views.decorators.http import require_http_methods
 import jwt
 from bson.objectid import ObjectId
 from apps.db.mongo.collections import admin_access_collection
+from django.conf import settings
 
 load_dotenv()
-SECRET = os.getenv("JWT_SECRET")
 RESENT_API_KEY = os.getenv("RESENT_API_KEY")
 print("this is resent", RESENT_API_KEY)
 
@@ -278,7 +278,7 @@ def verify_otp(request):
                 "email": email,
                 "exp": now_utc + datetime.timedelta(hours=2)
             },
-            SECRET,
+            settings.SECRET_KEY,
             algorithm="HS256"
         )
 
