@@ -291,11 +291,29 @@ def delete_user(request):
     if error:
         return error
 
-    users_collection.delete_one({"_id": user["_id"]})
+    try:
+        data = json.loads(request.body)
+        password = data.get("password")
 
-    log_info(f"User deleted: {user['email']}")
+        if not password:
+            return JsonResponse({"error": "Password required"}, status=400)
 
-    return JsonResponse({"message": "User deleted"})
+        # 🔐 Verify password
+        if not bcrypt.checkpw(password.encode(), user["password"].encode()):
+            return JsonResponse({"error": "Incorrect password"}, status=401)
+
+        # 🧹 Delete related data
+        enrollments_collection.delete_many({"user_id": user["_id"]})
+        address_collection.delete_many({"user_id": user["_id"]})
+
+        # 🗑️ Delete user
+        users_collection.delete_one({"_id": user["_id"]})
+
+        return JsonResponse({"message": "Account deleted successfully"})
+
+    except Exception as e:
+        print("DELETE ERROR:", str(e))
+        return JsonResponse({"error": "Failed to delete account"}, status=500)
 
 
 # ================= ADDRESS ================= #
@@ -343,18 +361,6 @@ def get_addresses(request):
     return JsonResponse({"addresses": addresses})
 
 
-@csrf_exempt
-def delete_address(request, address_id):
-    user, error = decode_token(request)
-    if error:
-        return error
-
-    address_collection.delete_one({
-        "_id": ObjectId(address_id),
-        "user_id": user["_id"]
-    })
-
-    return JsonResponse({"message": "Deleted"})
 
 @csrf_exempt
 def logout_user(request):

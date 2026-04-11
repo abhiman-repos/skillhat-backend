@@ -18,7 +18,7 @@ urlpatterns = [
     # ================= ADDRESS ================= #
     path("address/add/", views.add_address, name="add_address"),
     path("address/", views.get_addresses, name="get_addresses"),
-    path("address/delete/<str:address_id>/", views.delete_address, name="delete_address"),
+
 
     path("my-enrollments/", views.my_enrollments),
     path("my-certificates/", views.my_certificates),
