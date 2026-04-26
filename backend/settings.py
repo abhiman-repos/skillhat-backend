@@ -28,9 +28,7 @@ load_dotenv(env_path)
 SECRET_KEY  = os.getenv("JWT_SECRET")
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-print(SECRET_KEY)
-print(EMAIL_HOST_USER)
-print(EMAIL_HOST_PASSWORD)
+
 
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp-relay.brevo.com"
