@@ -24,16 +24,19 @@ env_path = BASE_DIR / ".env"
 load_dotenv(env_path)
 
 # Load keys correctly
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+
 SECRET_KEY  = os.getenv("JWT_SECRET")
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 print(SECRET_KEY)
+print(EMAIL_HOST_USER)
+print(EMAIL_HOST_PASSWORD)
 
-print("🔑 RESEND_API_KEY loaded")
-if RESEND_API_KEY:
-    print("🔑 Key starts with:", RESEND_API_KEY[:15] + "...")
-else:
-    print("❌ RESEND_API_KEY is still empty!")
-
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "smtp-relay.brevo.com"
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+DEFAULT_FROM_EMAIL = "SkillHat <no-reply@skillhat.in>"
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -44,12 +47,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-7%1!8@vv@)u*#m9)1p!2g6xk_hfc9434$5$q33bve#2w&++(81'
+# SECRET_KEY = 'django-insecure-7%1!8@vv@)u*#m9)1p!2g6xk_hfc9434$5$q33bve#2w&++(81'
 
 
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = []
 
