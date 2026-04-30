@@ -1,97 +1,43 @@
-import logging
+import requests
 from django.conf import settings
-from django.core.mail import EmailMultiAlternatives
+import logging
 
 logger = logging.getLogger(__name__)
 
-
 def send_otp_email(to_email: str, otp: str, expiry_minutes: int = 5):
-    subject = "🔐 Your Admin Login OTP - Secure Verification"
-
-    html_content = f"""
-    <div style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-                max-width: 520px; 
-                margin: 40px auto; 
-                padding: 40px 30px; 
-                border: 1px solid #e5e7eb; 
-                border-radius: 16px;
-                background-color: #ffffff;">
-        
-        <!-- Header -->
-        <div style="text-align: center; margin-bottom: 30px;">
-            <h1 style="color: #1e3a8a; margin: 0; font-size: 24px; font-weight: 600;">
-                Admin Login Verification
-            </h1>
-        </div>
-
-        <!-- OTP Section -->
-        <div style="background-color: #f8fafc; 
-                    padding: 24px; 
-                    border-radius: 12px; 
-                    text-align: center; 
-                    border: 2px solid #e0e7ff; 
-                    margin-bottom: 24px;">
-            
-            <p style="color: #374151; font-size: 15px; margin: 0 0 12px 0;">
-                Your One-Time Password (OTP) is:
-            </p>
-            
-            <p style="font-size: 36px; 
-                    font-weight: 700; 
-                    letter-spacing: 12px; 
-                    color: #1e40af; 
-                    margin: 16px 0 20px 0; 
-                    font-family: monospace;">
-                {otp}
-            </p>
-            
-            <p style="color: #64748b; font-size: 14px; margin: 0;">
-                This code is valid for <strong>{expiry_minutes} minutes</strong>
-            </p>
-        </div>
-
-        <!-- Instructions -->
-        <p style="color: #374151; line-height: 1.6; font-size: 15px;">
-            Please enter this OTP to complete your admin login. 
-            For security reasons, do not share this code with anyone.
-        </p>
-
-        <!-- Warning -->
-        <div style="background-color: #fef3c7; 
-                    border-left: 4px solid #f59e0b; 
-                    padding: 16px; 
-                    margin: 24px 0; 
-                    border-radius: 6px;">
-            <p style="color: #92400e; font-size: 14px; margin: 0; line-height: 1.5;">
-                <strong>⚠️ Security Warning:</strong><br>
-                This OTP is for your use only. If you did not request this code, 
-                please ignore this email.
-            </p>
-        </div>
-
-        <!-- Footer -->
-        <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 13px; text-align: center;">
-            <p style="margin: 0;">
-                This is an automated security email from SkillHat.<br>
-            </p>
-        </div>
-    </div>
-    """
-
     try:
-        msg = EmailMultiAlternatives(
-            subject=subject,
-            body="",  # plain text optional
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            to=[to_email],
-        )
+        url = "https://api.brevo.com/v3/smtp/email"
 
-        msg.attach_alternative(html_content, "text/html")
-        msg.send()
+        headers = {
+            "accept": "application/json",
+            "api-key": settings.BREVO_API_KEY,
+            "content-type": "application/json"
+        }
 
-        logger.info(f"OTP email sent successfully to {to_email}")
+        html_content = f"""
+        <h2>Your OTP is {otp}</h2>
+        <p>This OTP is valid for {expiry_minutes} minutes</p>
+        """
+
+        data = {
+            "sender": {
+                "name": "SkillHat",
+                "email": "no-reply@skillhat.in"
+            },
+            "to": [{"email": to_email}],
+            "subject": "🔐 Your Admin Login OTP",
+            "htmlContent": html_content
+        }
+
+        response = requests.post(url, json=data, headers=headers, timeout=10)
+
+        if response.status_code not in [200, 201]:
+            logger.error(f"Brevo API failed: {response.text}")
+            raise Exception("Email sending failed")
+
+        logger.info(f"OTP email sent to {to_email}")
         return True
 
     except Exception as e:
-        logger.error(f"Brevo SMTP error while sending to {to_email}: {str(e)}")
+        logger.error(f"Email error: {str(e)}")
         raise

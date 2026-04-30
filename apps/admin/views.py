@@ -2,6 +2,7 @@ import random
 import datetime
 import json
 import os
+import threading
 from dotenv import load_dotenv
 import logging
 from django.http import JsonResponse
@@ -17,6 +18,20 @@ RESENT_API_KEY = os.getenv("RESENT_API_KEY")
 print("this is resent", RESENT_API_KEY)
 
 logger = logging.getLogger(__name__)
+
+# ====================== ASYNC EMAIL ======================
+def send_async_email(email, otp):
+    try:
+        from apps.utils.email import send_otp_email
+        send_otp_email(email, otp, expiry_minutes=5)
+        logger.info(f"OTP email sent to {email}")
+    except Exception as e:
+        logger.error(f"Email failed for {email}: {str(e)}")
+        print(f"\n{'='*50}")
+        print(f"❌ Email failed for {email}")
+        print(f"🔐 OTP: {otp}")
+        print(f"Error: {e}")
+        print(f"{'='*50}\n")
 
 # ====================== ADMIN MANAGEMENT ======================
 
@@ -129,6 +144,7 @@ def delete_admin(request, admin_id):
 @require_http_methods(["POST"])
 def send_otp(request):
     try:
+        # Parse request
         body = json.loads(request.body)
         email = body.get("email")
 
@@ -137,73 +153,77 @@ def send_otp(request):
 
         email = email.lower().strip()
 
-        # Find admin record
+        # Check admin exists
         admin_record = admin_access_collection.find_one({"email": email})
         if not admin_record:
-            return JsonResponse({"error": "Access denied: Not an authorized admin"}, status=403)
+            return JsonResponse(
+                {"error": "Access denied: Not an authorized admin"},
+                status=403
+            )
 
-        # Check if admin access has expired
+        # Check expiry
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         expires_at = admin_record.get("expires_at")
-        
+
         if isinstance(expires_at, datetime.datetime) and expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=datetime.timezone.utc)
 
-        if now_utc > expires_at:
-            return JsonResponse({"error": "Admin access has expired"}, status=403)
+        if not expires_at or now_utc > expires_at:
+            return JsonResponse(
+                {"error": "Admin access has expired"},
+                status=403
+            )
 
-        # Generate OTP - store as string consistently
+        # 🔒 Rate limiting (prevent spam OTP)
+        otp_created_at = admin_record.get("otp_created_at")
+        if otp_created_at:
+            if otp_created_at.tzinfo is None:
+                otp_created_at = otp_created_at.replace(tzinfo=datetime.timezone.utc)
+
+            diff_seconds = (now_utc - otp_created_at).total_seconds()
+            if diff_seconds < 30:
+                return JsonResponse(
+                    {"error": "Please wait before requesting another OTP"},
+                    status=429
+                )
+
+        # Generate OTP
         otp = str(random.randint(100000, 999999))
-        
-        # Store OTP and its creation time in the admin document
-        result = admin_access_collection.update_one(
+
+        # Store OTP
+        admin_access_collection.update_one(
             {"email": email},
             {
                 "$set": {
-                    "otp": otp,  # Store as string
+                    "otp": otp,
                     "otp_created_at": now_utc
                 }
             }
         )
-        
-        logger.info(f"OTP generated for {email}: {otp}")
-        logger.debug(f"Update result: matched={result.matched_count}, modified={result.modified_count}")
 
-        # Send email with OTP
-        try:
-            # Try to import and use Resend
-            try:
-                from apps.utils.email import send_otp_email
-                send_otp_email(email, otp, expiry_minutes=5)
-            except ImportError as ie:
-                logger.warning(f"Email module not found: {ie}")
-                # Print OTP to console for development
-                print(f"\n{'='*50}")
-                print(f"🔐 OTP for {email}: {otp}")
-                print(f"⏰ Expires in: 5 minutes")
-                print(f"{'='*50}\n")
-            except Exception as email_error:
-                logger.error(f"Failed to send email: {str(email_error)}")
-                # Print OTP to console as fallback
-                print(f"\n{'='*50}")
-                print(f"🔐 OTP for {email}: {otp} (Email failed: {email_error})")
-                print(f"{'='*50}\n")
-                
-        except Exception as email_error:
-            logger.error(f"Email error: {str(email_error)}")
-            # Still return success since OTP is stored
-            # User can check console/logs for OTP
+        logger.info(f"OTP generated for {email}")
 
-        return JsonResponse({"message": "OTP sent successfully to your email"})
+        # 🚀 Send email asynchronously
+        threading.Thread(
+            target=send_async_email,
+            args=(email, otp),
+            daemon=True  # important for production
+        ).start()
+
+        # Return response immediately
+        return JsonResponse({
+            "message": "OTP sent successfully to your email"
+        })
 
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON body"}, status=400)
-    except ValueError as ve:
-        logger.error(str(ve))
-        return JsonResponse({"error": "Email service configuration error"}, status=500)
+
     except Exception as e:
         logger.error(f"Send OTP Error: {str(e)}")
-        return JsonResponse({"error": "Failed to send OTP. Please try again later."}, status=500)
+        return JsonResponse(
+            {"error": "Failed to send OTP. Please try again later."},
+            status=500
+        )
 
 
 @csrf_exempt
