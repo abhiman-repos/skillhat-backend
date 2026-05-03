@@ -10,7 +10,8 @@ from .views import (
     enroll_internship,
     all_enrollments,
     remove_enrollment,
-    send_certificate
+    send_certificate,
+    verify_certificate
     
 )
 
@@ -25,7 +26,6 @@ urlpatterns = [
     path("enroll/", enroll_internship),
     path("remove-enrollment/<str:enrollment_id>/", remove_enrollment),
     path("enrollments/", all_enrollments),
-    path("send-certificate/", send_certificate)
-
-    
+    path("send-certificate/", send_certificate),
+    path("verify/<str:certificate_id>/", verify_certificate),
 ]

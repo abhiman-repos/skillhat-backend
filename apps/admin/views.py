@@ -10,8 +10,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 import jwt
 from bson.objectid import ObjectId
-from apps.db.mongo.collections import admin_access_collection
+from apps.db.mongo.collections import admin_access_collection, certificates_collection
 from django.conf import settings
+from apps.internship.views import decode_admin_token
 
 load_dotenv()
 RESENT_API_KEY = os.getenv("RESENT_API_KEY")
@@ -327,3 +328,64 @@ def verify_otp(request):
     except Exception as e:
         logger.error(f"Verify OTP Error: {str(e)}")
         return JsonResponse({"error": "Internal server error"}, status=500)
+    
+
+@csrf_exempt
+def admin_certificates(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    admin, error = decode_admin_token(request)
+    if error:
+        return error
+
+    try:
+        certs = list(certificates_collection.find().sort("issued_at", -1))
+
+        result = []
+
+        for c in certs:
+            result.append({
+                "id": str(c["_id"]),
+                "certificate_id": c.get("certificate_id"),
+
+                "user_name": c.get("user_name"),
+                "user_email": c.get("user_email"),
+
+                "internship_title": c.get("internship_title"),
+                "company_name": c.get("company_name"),
+                "mentor_name": c.get("mentor_name"),
+
+                "issued_at": c.get("issued_at").isoformat() if c.get("issued_at") else None,
+                "status": c.get("status", "valid")
+            })
+
+        return JsonResponse({"certificates": result})
+
+    except Exception as e:
+        print("ADMIN CERT ERROR:", str(e))
+        return JsonResponse({"error": "Failed"}, status=500)
+    
+@csrf_exempt
+def delete_certificate(request, certificate_id):
+    if request.method != "DELETE":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    admin, error = decode_admin_token(request)
+    if error:
+        return error
+
+    try:
+        # 🔥 Delete using certificate_id (NOT Mongo _id)
+        result = certificates_collection.delete_one({
+            "certificate_id": certificate_id
+        })
+
+        if result.deleted_count == 0:
+            return JsonResponse({"error": "Certificate not found"}, status=404)
+
+        return JsonResponse({"message": "Certificate deleted successfully"})
+
+    except Exception as e:
+        print("DELETE CERT ERROR:", str(e))
+        return JsonResponse({"error": "Failed"}, status=500)

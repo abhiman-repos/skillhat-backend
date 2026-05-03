@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import verify_otp, send_otp,  add_admin, delete_admin, list_admins
+from .views import verify_otp, send_otp,  add_admin, delete_admin, list_admins, admin_certificates, delete_certificate
 
 urlpatterns = [
     path('admins/', list_admins, name='list_admins'),
@@ -7,4 +7,6 @@ urlpatterns = [
     path('delete-admin/<str:admin_id>', delete_admin, name='delete_admin'),
     path('send-otp/', send_otp, name='send_otp'),
     path('verify-otp/', verify_otp, name='verify_otp'),
+    path("certificates/", admin_certificates),
+    path("certificates/delete/<str:certificate_id>/", delete_certificate),
 ]

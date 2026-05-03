@@ -8,7 +8,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 
-from apps.db.mongo.collections import users_collection, address_collection,admin_access_collection, enrollments_collection, internships_collection
+from apps.db.mongo.collections import users_collection, address_collection,admin_access_collection, enrollments_collection, internships_collection, certificates_collection
 from apps.utils.logger import log_error, log_info
 
 
@@ -413,24 +413,43 @@ def my_certificates(request):
     if error:
         return error
 
-    enrollments = list(enrollments_collection.find({
-        "user_id": user["_id"],
-        "certificate_issued": True
+    from bson import ObjectId
+
+    # 🔥 Ensure correct type
+    user_id = user["_id"]
+    if isinstance(user_id, str):
+        user_id = ObjectId(user_id)
+
+    certificates = list(certificates_collection.find({
+        "user_id": user_id
     }))
 
     result = []
 
-    for e in enrollments:
-        internship = internships_collection.find_one({
-            "_id": e["internship_id"]
-        })
-
+    for c in certificates:
         result.append({
-            "id": str(e["_id"]),
-            "title": internship.get("title"),
-            "course": internship.get("title"),
-            "issuedDate": e.get("issued_at"),
-            "certificateId": f"CERT-{str(e['_id'])[:6]}"
+            "id": str(c["_id"]),
+
+            # 🔥 CORE
+            "certificateId": c.get("certificate_id"),
+
+            # 🔥 DISPLAY DATA
+            "title": c.get("internship_title"),
+            "course": c.get("internship_title"),
+
+            # 🔥 USER DATA
+            "user_name": c.get("user_name"),
+            "user_email": c.get("user_email"),
+
+            # 🔥 EXTRA DETAILS
+            "company_name": c.get("company_name"),
+            "mentor_name": c.get("mentor_name"),
+
+            # 🔥 DATE
+            "issuedDate": c.get("issued_at").isoformat() if c.get("issued_at") else None,
+
+            # 🔥 STATUS
+            "status": c.get("status", "valid")
         })
 
     return JsonResponse({"certificates": result})

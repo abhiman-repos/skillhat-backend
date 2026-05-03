@@ -3,37 +3,51 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 from datetime import datetime
 import cloudinary.uploader
-from apps.db.mongo.collections import internships_collection, mentors_collection, enrollments_collection, users_collection, admin_access_collection
+from apps.db.mongo.collections import internships_collection, mentors_collection, enrollments_collection, users_collection, admin_access_collection, certificates_collection
 from bson import ObjectId
 from bson.errors import InvalidId
 from apps.users.views import decode_token
 import jwt 
 from django.conf import settings
+import uuid
 
 
 
 def decode_admin_token(request):
     auth_header = request.headers.get("Authorization")
 
-    if not auth_header or not auth_header.startswith("Bearer"):
-        return None, JsonResponse({"error": "Unauthorized"}, status=401)
+    # 🔥 CHECK HEADER
+    if not auth_header:
+        return None, JsonResponse({"error": "Authorization header missing"}, status=401)
+
+    if not auth_header.startswith("Bearer "):   # ✅ IMPORTANT SPACE
+        return None, JsonResponse({"error": "Invalid auth format"}, status=401)
 
     try:
         token = auth_header.split(" ")[1].strip()
 
+        # 🔥 TOKEN VALIDATION
         if not token or token in ["undefined", "null"]:
             return None, JsonResponse({"error": "Invalid token"}, status=401)
 
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-        print("this is the value of secret key",settings.SECRET_KEY)
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])  # 🔥 DEBUG
 
+        # 🔥 SUPPORT MULTIPLE PAYLOAD TYPES
         email = payload.get("email")
-        if not email:
-            return None, JsonResponse({"error": "Invalid admin token"}, status=401)
+        admin_id = payload.get("id")
 
-        admin = admin_access_collection.find_one({
-            "email": email.lower().strip()
-        })
+        admin = None
+
+        if email:
+            admin = admin_access_collection.find_one({
+                "email": email.lower().strip()
+            })
+
+        elif admin_id:
+            from bson import ObjectId
+            admin = admin_access_collection.find_one({
+                "_id": ObjectId(admin_id)
+            })
 
         if not admin:
             return None, JsonResponse({"error": "Admin not found"}, status=403)
@@ -369,16 +383,32 @@ def all_enrollments(request):
         result = []
 
         for e in enrollments:
-            user = users_collection.find_one({"_id": e["user_id"]})
+            try:
+                user_id = e.get("user_id")
+
+                # 🔥 Ensure ObjectId
+                if isinstance(user_id, str):
+                    user_id = ObjectId(user_id)
+
+                user = users_collection.find_one({"_id": user_id})
+
+            except Exception:
+                user = None
+
             internship = internships_collection.find_one({"_id": e["internship_id"]})
 
             result.append({
                 "_id": str(e["_id"]),
+
                 "user": {
                     "id": str(user["_id"]),
-                    "name": user.get("full_name"),
-                    "email": user.get("email"),
-                } if user else None,
+                    "name": user.get("full_name") or user.get("name") or "Unknown User",
+                    "email": user.get("email") or "N/A",
+                } if user else {
+                    "id": None,
+                    "name": "User not found",
+                    "email": "N/A"
+                },
 
                 "internship": {
                     "id": str(internship["_id"]),
@@ -433,32 +463,120 @@ def send_certificate(request):
         return error
 
     try:
-        data = json.loads(request.body)
+        data = json.loads(request.body or "{}")
 
         user_id = data.get("user_id")
         internship_id = data.get("internship_id")
 
+        # 🔒 Validate IDs
         if not ObjectId.is_valid(user_id) or not ObjectId.is_valid(internship_id):
             return JsonResponse({"error": "Invalid IDs"}, status=400)
 
-        result = enrollments_collection.update_one(
-            {
-                "user_id": ObjectId(user_id),
-                "internship_id": ObjectId(internship_id)
-            },
-            {
-                "$set": {
-                    "certificate_issued": True,
-                    "issued_at": datetime.utcnow()
-                }
-            }
+        user_oid = ObjectId(user_id)
+        internship_oid = ObjectId(internship_id)
+
+        # 🔍 Check already exists
+        existing = certificates_collection.find_one({
+            "user_id": user_oid,
+            "internship_id": internship_oid,
+            "status": {"$ne": "deleted"}
+        })
+
+        if existing:
+            return JsonResponse({
+                "error": "Certificate already issued",
+                "certificate_id": existing["certificate_id"]
+            }, status=400)
+
+        # 🔥 Fetch data safely
+        user = users_collection.find_one({"_id": user_oid})
+        internship = internships_collection.find_one({"_id": internship_oid})
+
+        if not user:
+            return JsonResponse({"error": "User not found"}, status=404)
+
+        if not internship:
+            return JsonResponse({"error": "Internship not found"}, status=404)
+
+        # 🔥 SAFE FIELD HANDLING
+        user_name = (
+            user.get("full_name")
+            or user.get("name")
+            or user.get("username")
+            or "Unknown User"
         )
 
-        if result.matched_count == 0:
-            return JsonResponse({"error": "Enrollment not found"}, status=404)
+        user_email = (
+            user.get("email")
+            or user.get("user_email")
+            or "no-email@skillhat.com"
+        )
 
-        return JsonResponse({"message": "Certificate issued"})
+        internship_title = internship.get("title") or "Internship"
+        company_name = internship.get("company") or "SkillHat"
+
+        mentor_name = None
+        if internship.get("mentors") and len(internship["mentors"]) > 0:
+            mentor_name = internship["mentors"][0].get("name")
+
+        # 🔥 Better certificate ID
+        certificate_id = f"CERT-{datetime.utcnow().year}-{uuid.uuid4().hex[:6].upper()}"
+
+        # 🔥 Insert
+        certificates_collection.insert_one({
+            "certificate_id": certificate_id,
+            "user_id": user_oid,
+            "internship_id": internship_oid,
+
+            # ✅ SNAPSHOT (FIXED)
+            "user_name": user_name,
+            "user_email": user_email,
+            "internship_title": internship_title,
+            "company_name": company_name,
+            "mentor_name": mentor_name,
+
+            "issued_by": str(admin.get("_id")),
+            "issued_at": datetime.utcnow(),
+            "status": "valid"
+        })
+
+        return JsonResponse({
+            "message": "Certificate issued successfully",
+            "certificate_id": certificate_id
+        })
 
     except Exception as e:
-        print("CERT ERROR:", str(e))
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({"error": "Failed"}, status=500)
+
+def verify_certificate(request, certificate_id):
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    try:
+        cert = certificates_collection.find_one({
+            "certificate_id": certificate_id
+        })
+
+        if not cert:
+            return JsonResponse({
+                "valid": False,
+                "message": "Certificate not found"
+            }, status=404)
+
+        return JsonResponse({
+            "valid": True,
+            "certificate_id": cert.get("certificate_id"),
+            "user_name": cert.get("user_name"),
+            "user_email": cert.get("user_email"),
+            "internship_title": cert.get("internship_title"),
+            "company_name": cert.get("company_name"),
+            "mentor_name": cert.get("mentor_name"),
+            "issued_at": cert.get("issued_at").isoformat() if cert.get("issued_at") else None,
+            "status": cert.get("status", "valid")
+        })
+
+    except Exception as e:
+        print("VERIFY ERROR:", str(e))
         return JsonResponse({"error": "Failed"}, status=500)
