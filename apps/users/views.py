@@ -7,6 +7,12 @@ from bson import ObjectId
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
+from datetime import datetime, timedelta
+from rest_framework.response import Response
+from apps.users.googleauth.services import verify_google_token, get_or_create_google_user
+
+from rest_framework.decorators import api_view
+
 
 from apps.db.mongo.collections import users_collection, address_collection,admin_access_collection, enrollments_collection, internships_collection, certificates_collection
 from apps.utils.logger import log_error, log_info
@@ -94,6 +100,41 @@ def safe_json(request):
 
 
 # ================= AUTH ================= #
+
+@csrf_exempt
+@api_view(["POST"])
+def google_login(request):
+    token = request.data.get("token")
+    if not token:
+        return Response({"error": "Token is required"}, status=400)
+
+    idinfo = verify_google_token(token)
+    if not idinfo:
+        return Response({"error": "Invalid Google token"}, status=400)
+
+    user_doc, created = get_or_create_google_user(idinfo)
+
+    user_id = user_doc["_id"]
+    email = user_doc["email"]
+    full_name = user_doc.get("full_name", "")
+
+    # Generate JWT
+    payload = {
+        "user_id": user_id,
+        "email": email,
+        "exp": datetime.utcnow() + timedelta(days=7),
+        "iat": datetime.utcnow(),
+    }
+    jwt_token = jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
+
+    return Response({
+        "token": jwt_token,
+        "user": {
+            "id": user_id,
+            "full_name": full_name,
+            "email": email,
+        }
+    }, status=200)
 
 @csrf_exempt
 def user_register(request):

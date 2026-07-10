@@ -29,7 +29,7 @@ SECRET_KEY  = os.getenv("JWT_SECRET")
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
-
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp-relay.brevo.com"

@@ -6,6 +6,7 @@ from . import views
 
 urlpatterns = [
     # ================= AUTH ================= #
+    path("google-login/", views.google_login, name="google-login"),
     path("register/", views.user_register, name="user_register"),
     path("login/", views.user_login, name="user_login"),
     path("logout/", views.logout_user, name="user_logout"),
