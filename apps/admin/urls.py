@@ -1,6 +1,14 @@
 from django.urls import path
-from .views import verify_otp, send_otp,  add_admin, delete_admin, list_admins, admin_certificates, delete_certificate
-from .advertisements.views import create_ad , list_ads ,delete_ad, update_ad, patch_ad, get_ad, active_ads
+from apps.admin.views import verify_otp, send_otp, add_admin, delete_admin, list_admins, admin_certificates, delete_certificate
+from apps.admin.advertisements.views import (
+    create_ad,
+    list_ads,
+    active_ads,
+    ad_detail,
+    track_view,
+    track_click,
+)
+
 urlpatterns = [
     path('admins/', list_admins, name='list_admins'),
     path('add-admin/', add_admin, name='add_admin'),           # or change to consistent /auth/add-admin
@@ -9,11 +17,15 @@ urlpatterns = [
     path('verify-otp/', verify_otp, name='verify_otp'),
     path("certificates/", admin_certificates),
     path("certificates/delete/<str:certificate_id>/", delete_certificate),
-    path("ads/active/", active_ads),
-    path("ads/", create_ad),
-    path("ads/<str:ad_id>/", update_ad),
-    path("ads/list/", list_ads),
-    path("ads/<str:ad_id>/", delete_ad),
-    path("ads/patch/", patch_ad),
-    path("ads/get/", get_ad),
+
+    # ── Ads ──────────────────────────────────────────────────────────
+    # IMPORTANT: literal paths ("active/", "list/") MUST be registered
+    # BEFORE the dynamic "<str:ad_id>/" pattern, or Django will try to
+    # match "active"/"list" as an ad_id since it resolves top-to-bottom.
+    path("ads/active/", active_ads),          # GET  — public, active ads only
+    path("ads/list/", list_ads),              # GET  — admin, all ads
+    path("ads/", create_ad),                  # POST — admin, create
+    path("ads/<str:ad_id>/", ad_detail),      # GET/PUT/PATCH/DELETE — admin, ONE entry handles all methods
+    path("ads/<str:ad_id>/view/", track_view),    # POST — public, increment view count
+    path("ads/<str:ad_id>/click/", track_click),  # POST — public, increment click count
 ]

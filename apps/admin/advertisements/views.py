@@ -1,7 +1,7 @@
 # advertisements/views.py
 import logging
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view, permission_classes 
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 import json
@@ -42,6 +42,7 @@ def admin_required_fast(view_func):
         return view_func(request, *args, **kwargs)
     return wrapper
 
+
 def admin_required(view_func):
     @functools.wraps(view_func)          # ← CRITICAL: preserves function metadata
     def wrapper(request, *args, **kwargs):
@@ -59,6 +60,33 @@ def admin_required(view_func):
     return wrapper
 
 
+# ══════════════════════════════════════════════════════════════════════
+# IMPORTANT — DECORATOR ORDER
+#
+# @api_view MUST be the outermost decorator (top of the stack). It is
+# what turns a plain function into a real DRF view: it builds the DRF
+# Request object, runs permission checks, and — critically — calls
+# response.render() with the correct renderer attached. If a custom
+# decorator (like admin_required) sits ABOVE @api_view, it executes
+# before any of that happens, receives a raw WSGIRequest instead of a
+# DRF Request, and any Response it returns bypasses finalize_response(),
+# so DRF's Response.render() crashes with
+# "AssertionError: .accepted_renderer not set on Response".
+#
+# We also explicitly set permission_classes=[AllowAny] on every endpoint
+# below, because auth here is handled manually via JWT in admin_required
+# — not through DRF's built-in authentication/permission system. Without
+# AllowAny, DRF falls back to your project's DEFAULT_PERMISSION_CLASSES
+# and can reject the request before admin_required ever runs.
+#
+# Correct order (bottom → top of stack, i.e. innermost → outermost):
+#   admin_required   (closest to the function — does the actual auth)
+#   permission_classes([AllowAny])  (tells DRF not to gate on its own auth)
+#   api_view([...])  (outermost — must be on top)
+#   csrf_exempt      (fine to keep as the very outer wrapper too)
+# ══════════════════════════════════════════════════════════════════════
+
+
 # ─── Public: active ads (no auth required) ────────────────────────────────
 @csrf_exempt
 @api_view(["GET"])
@@ -66,7 +94,7 @@ def admin_required(view_func):
 def active_ads(request):
     index = request.query_params.get("index")
     ads = list(advertisements_collection.find({"active": True}).sort("order", 1))
-    
+
     if index is not None:
         try:
             idx = int(index)
@@ -78,7 +106,7 @@ def active_ads(request):
                 return Response({"error": "No more ads"}, status=404)
         except ValueError:
             return Response({"error": "Invalid index"}, status=400)
-    
+
     # original behaviour: return all
     for ad in ads:
         ad["_id"] = str(ad["_id"])
@@ -87,8 +115,9 @@ def active_ads(request):
 
 # ─── Admin: list all ads ─────────────────────────────────────────────────
 @csrf_exempt
-@admin_required
 @api_view(["GET"])
+@permission_classes([AllowAny])
+@admin_required
 def list_ads(request):
     ads = list(advertisements_collection.find().sort("order", 1))
     for ad in ads:
@@ -100,8 +129,9 @@ def list_ads(request):
 import traceback
 
 @csrf_exempt
-@admin_required
 @api_view(["POST"])
+@permission_classes([AllowAny])
+@admin_required
 def create_ad(request):
     try:
         data = request.data.dict() if hasattr(request.data, 'dict') else request.data.copy()
@@ -146,15 +176,87 @@ def create_ad(request):
             {"error": f"Server error: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@csrf_exempt
+@api_view(["GET", "PUT", "PATCH", "DELETE"])
+@permission_classes([AllowAny])
+@admin_required
+def ad_detail(request, ad_id):
+    try:
+        obj_id = ObjectId(ad_id)
+    except Exception:
+        return Response({"error": "Invalid ID"}, status=400)
+
+    existing = advertisements_collection.find_one({"_id": obj_id})
+    if not existing:
+        return Response({"error": "Ad not found"}, status=404)
+
+    # ── GET: retrieve ──
+    if request.method == "GET":
+        existing["_id"] = str(existing["_id"])
+        return Response(existing)
+
+    # ── DELETE ──
+    if request.method == "DELETE":
+        advertisements_collection.delete_one({"_id": obj_id})
+        return Response({"message": "Ad deleted"})
+
+    # ── PUT: full-ish update, supports image re-upload ──
+    if request.method == "PUT":
+        data = request.data.dict() if hasattr(request.data, 'dict') else request.data.copy()
+
+        image_file = request.FILES.get('image_file')
+        if image_file:
+            try:
+                upload_result = cloudinary.uploader.upload(image_file, folder="ads/")
+                data['image'] = upload_result['secure_url']
+            except Exception as e:
+                return Response({"error": f"Image upload failed: {str(e)}"}, status=400)
+
+        allowed = {
+            "image", "height", "width",
+            "buttonText", "buttonLink",
+            "buttonColor", "buttonBg", "buttonSize", "buttonBorderRadius",
+            "autoCloseSeconds", "active", "order",
+        }
+        update_fields = {k: data[k] for k in allowed if k in data}
+        if not update_fields:
+            return Response({"error": "No valid fields to update"}, status=400)
+
+        advertisements_collection.update_one({"_id": obj_id}, {"$set": update_fields})
+        updated = advertisements_collection.find_one({"_id": obj_id})
+        updated["_id"] = str(updated["_id"])
+        return Response(updated)
+
+    # ── PATCH: partial update, JSON body only ──
+    if request.method == "PATCH":
+        data = request.data
+        allowed = {
+            "image", "height", "width",
+            "buttonText", "buttonLink",
+            "buttonColor", "buttonBg", "buttonSize", "buttonBorderRadius",
+            "autoCloseSeconds", "active", "order",
+        }
+        update_fields = {k: v for k, v in data.items() if k in allowed}
+        if not update_fields:
+            return Response({"error": "No valid fields"}, status=400)
+
+        advertisements_collection.update_one({"_id": obj_id}, {"$set": update_fields})
+        updated = advertisements_collection.find_one({"_id": obj_id})
+        updated["_id"] = str(updated["_id"])
+        return Response(updated)
+
+
 # ─── Admin: retrieve single ad ───────────────────────────────────────────
 @csrf_exempt
-@admin_required
 @api_view(["GET"])
-
+@permission_classes([AllowAny])
+@admin_required
 def get_ad(request, ad_id):
     try:
         ad = advertisements_collection.find_one({"_id": ObjectId(ad_id)})
-    except:
+    except Exception:
         return Response({"error": "Invalid ID"}, status=400)
     if not ad:
         return Response({"error": "Ad not found"}, status=404)
@@ -164,13 +266,13 @@ def get_ad(request, ad_id):
 
 # ─── Admin: update ad ───────────────────────────────────────────────────
 @csrf_exempt
-@admin_required
 @api_view(["PUT"])
-
+@permission_classes([AllowAny])
+@admin_required
 def update_ad(request, ad_id):
     try:
         obj_id = ObjectId(ad_id)
-    except:
+    except Exception:
         return Response({"error": "Invalid ID"}, status=400)
 
     data = request.data.dict() if hasattr(request.data, 'dict') else request.data.copy()
@@ -191,7 +293,7 @@ def update_ad(request, ad_id):
         "image", "height", "width",
         "buttonText", "buttonLink",
         "buttonColor", "buttonBg", "buttonSize", "buttonBorderRadius",
-        "autoCloseSeconds",
+        "autoCloseSeconds", "active", "order",
     }
     for key in allowed:
         if key in data:
@@ -208,14 +310,18 @@ def update_ad(request, ad_id):
 
 # ─── Admin: partial update ──────────────────────────────────────────────
 @csrf_exempt
-@admin_required
 @api_view(["PATCH"])
-
+@permission_classes([AllowAny])
+@admin_required
 def patch_ad(request, ad_id):
     try:
         obj_id = ObjectId(ad_id)
-    except:
+    except Exception:
         return Response({"error": "Invalid ID"}, status=400)
+
+    existing = advertisements_collection.find_one({"_id": obj_id})
+    if not existing:
+        return Response({"error": "Ad not found"}, status=404)
 
     data = request.data
     allowed = {
@@ -223,7 +329,7 @@ def patch_ad(request, ad_id):
         "buttonText", "buttonLink",
         "buttonColor", "buttonBg", "buttonSize", "buttonBorderRadius",
         "autoCloseSeconds",
-        "active",
+        "active", "order",
     }
     update_fields = {k: v for k, v in data.items() if k in allowed}
     if not update_fields:
@@ -237,13 +343,13 @@ def patch_ad(request, ad_id):
 
 # ─── Admin: delete ad ───────────────────────────────────────────────────
 @csrf_exempt
-@admin_required
 @api_view(["DELETE"])
-
+@permission_classes([AllowAny])
+@admin_required
 def delete_ad(request, ad_id):
     try:
         obj_id = ObjectId(ad_id)
-    except:
+    except Exception:
         return Response({"error": "Invalid ID"}, status=400)
     result = advertisements_collection.delete_one({"_id": obj_id})
     if result.deleted_count == 0:
@@ -258,10 +364,11 @@ def delete_ad(request, ad_id):
 def track_view(request, ad_id):
     try:
         obj_id = ObjectId(ad_id)
-    except:
+    except Exception:
         return Response({"error": "Invalid ID"}, status=400)
     advertisements_collection.update_one({"_id": obj_id}, {"$inc": {"views": 1}})
     return Response({"status": "ok"})
+
 
 @csrf_exempt
 @api_view(["POST"])
@@ -269,7 +376,7 @@ def track_view(request, ad_id):
 def track_click(request, ad_id):
     try:
         obj_id = ObjectId(ad_id)
-    except:
+    except Exception:
         return Response({"error": "Invalid ID"}, status=400)
     advertisements_collection.update_one({"_id": obj_id}, {"$inc": {"clicks": 1}})
     return Response({"status": "ok"})
