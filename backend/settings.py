@@ -35,7 +35,7 @@ EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp-relay.brevo.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-DEFAULT_FROM_EMAIL = "SkillHat <no-reply@skillhat.in>"
+DEFAULT_FROM_EMAIL = "Gocyn <no-reply@gocyn.com>"
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.

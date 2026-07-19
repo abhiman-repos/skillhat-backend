@@ -21,11 +21,11 @@ def send_otp_email(to_email: str, otp: str, expiry_minutes: int = 5):
 
         data = {
             "sender": {
-                "name": "SkillHat",
-                "email": "no-reply@skillhat.in"
+                "name": "Gocyn",
+                "email": "no-reply@gocyn.com"
             },
             "to": [{"email": to_email}],
-            "subject": "🔐 Your Admin Login OTP",
+            "subject": " Your Admin Login OTP",
             "htmlContent": html_content
         }
 
