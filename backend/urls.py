@@ -25,6 +25,7 @@ urlpatterns = [
     path('upload/', include('apps.internship.urls')),
     path("auth/", include("apps.admin.urls")),
     path("api/users/", include("apps.users.urls")),
-    path("api/partner/", include("apps.partners.urls"))
+    path("api/partner/", include("apps.partners.urls")),
+    path('api/courses/', include('apps.courses.urls')),
 ]
 

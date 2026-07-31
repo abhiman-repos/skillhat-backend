@@ -17,3 +17,7 @@ otp_collection = db["otp"]
 admin_access_collection= db["admin_auth"]
 partners_collection = db["partners"]
 advertisements_collection = db["advertisements"]
+# apps/db/mongo_collections.py ke andar
+# apps/db/mongo/collection.py me check kar lo:
+courses_collection = db["courses"]
+course_enrollments_collection = db["course_enrollments"]
